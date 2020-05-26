@@ -3,8 +3,10 @@ const app = express()
 const fs = require('fs')
 const jwt = require('jsonwebtoken')
 const axios = require('axios')
+const open = require('open')
 
 const client_id = 'v3Jiber-nXC25tJXW6pKPrguCVlwsYsMxgcKZHmFTqE'
+const refresh_token = 'oa_sand_v0bXfS86DLVb2NzAgxBITJd2KYVMZ2xB0A-xXjJDTII'
 
 async function generateJWT() {
     let jwtValue = ''
@@ -29,8 +31,25 @@ async function generateJWT() {
     return jwtValue
 }
 
+async function getAccounts(access_token) {
+    try {
+        const options = {
+            headers: { Authorization: `Bearer ${access_token}` },
+        }
+        accounts = await axios
+            .get('https://sandbox-b2b.revolut.com/api/1.0/accounts', options)
+            .then((data) => data.data)
+            .catch((err) => false)
+    } catch (error) {
+        console.error('error on getting accounts')
+        return false
+    }
+    return accounts
+}
+
 async function auth(req, res) {
     let response
+    let newAccessToken
     let accounts
 
     const { code } = req.query
@@ -42,16 +61,25 @@ async function auth(req, res) {
             .post('https://sandbox-b2b.revolut.com/api/1.0/auth/token', body)
             .then((data) => data.data)
             .catch((err) => console.error(err))
-        const access_token = response.access_token
+        let access_token = response.access_token
         const refresh_token = response.refresh_token
 
-        const options = {
-            headers: { Authorization: `Bearer ${access_token}` },
+        console.log('refresh_token', refresh_token)
+
+        // if the access token expired, the getAccounts function will return false
+        accounts = await getAccounts(access_token)
+
+        // if it's false, then I get a new access_token
+        if (accounts === false) {
+            const refresh_body = `grant_type=refresh_token&refresh_token=${refresh_token}&client_assertion_type=urn:ietf:params:oauth:client-assertion-type:jwt-bearer&client_assertion=${jwt}`
+
+            access_token = await axios
+                .post('https://sandbox-b2b.revolut.com/api/1.0/auth/token', refresh_body)
+                .then((data) => data.data.access_token)
+                .catch((err) => console.error(err))
+
+            accounts = await getAccounts(access_token)
         }
-        accounts = await axios
-            .get('https://sandbox-b2b.revolut.com/api/1.0/accounts', options)
-            .then((data) => data.data)
-            .catch((err) => console.error(err))
     } catch (e) {
         console.error(e)
     }
@@ -66,5 +94,7 @@ app.get('/', (req, res) => {
 })
 
 app.listen(8000, () => {
+    // await open('http://127.0.0.1:8000')
+
     console.log('Success!')
 })
